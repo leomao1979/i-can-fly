@@ -1,0 +1,622 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>I Can Fly</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cesium@1.124.0/Build/Cesium/Widgets/widgets.css">
+<script src="https://cdn.jsdelivr.net/npm/cesium@1.124.0/Build/Cesium/Cesium.js"></script>
+<style>
+  :root {
+    --ink: #f3f6f9;
+    --dim: #a9b6c4;
+    --panel: rgba(13, 22, 33, 0.78);
+    --line: rgba(255, 255, 255, 0.14);
+    --accent: #ffb547;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #0b1622; color: var(--ink);
+    font: 14px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+  #view { position: absolute; inset: 0; }
+  #view canvas { cursor: grab; }
+  #view.dragging canvas { cursor: grabbing; }
+
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
+
+  /* start screen */
+  #start { position: absolute; inset: 0; display: grid; place-items: center; z-index: 20;
+    background: linear-gradient(180deg, #1c4f86 0%, #5d9bd0 55%, #cfe4f2 100%); }
+  #start.over { background: rgba(8, 14, 22, 0.55); }
+  #card { width: min(460px, calc(100vw - 32px)); padding: 26px 26px 22px; }
+  #card h1 { margin: 0 0 2px; font-size: 30px; letter-spacing: 0.04em; font-weight: 800; }
+  #card p.sub { margin: 0 0 18px; color: var(--dim); }
+  label { display: block; margin: 12px 0 5px; font-size: 12px; text-transform: uppercase;
+    letter-spacing: 0.08em; color: var(--dim); }
+  input[type=text], input[type=password] { width: 100%; padding: 10px 12px; border-radius: 7px;
+    border: 1px solid var(--line); background: rgba(255,255,255,0.08); color: var(--ink); font: inherit; }
+  input:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .hint { margin: 5px 0 0; font-size: 12px; color: var(--dim); }
+  .hint a { color: var(--accent); }
+  .row { display: flex; gap: 10px; margin-top: 18px; align-items: center; }
+  button { font: inherit; cursor: pointer; border-radius: 7px; border: 1px solid var(--line);
+    background: rgba(255,255,255,0.1); color: var(--ink); padding: 9px 14px; }
+  button.go { background: var(--accent); border-color: var(--accent); color: #1c1203; font-weight: 700;
+    padding: 10px 22px; }
+  button:disabled { opacity: 0.55; cursor: default; }
+  #msg { min-height: 20px; margin-top: 12px; font-size: 13px; color: var(--dim); }
+  #msg.err { color: #ffb0a3; }
+
+  /* in-flight overlays */
+  #hud, #help, #top { position: absolute; z-index: 10; display: none; }
+  body.flying #hud, body.flying #help, body.flying #top { display: block; }
+  #hud { top: 14px; left: 14px; padding: 12px 16px; min-width: 210px; font-variant-numeric: tabular-nums; }
+  #hud .big { font-size: 26px; font-weight: 700; line-height: 1.1; }
+  #hud .unit { font-size: 13px; color: var(--dim); font-weight: 400; margin-left: 4px; }
+  #hud .lbl { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--dim); margin-top: 9px; }
+  #hud .small { font-size: 13px; color: var(--dim); }
+  #top { top: 14px; right: 14px; }
+  #top button { margin-left: 6px; background: var(--panel); }
+  #help { left: 14px; bottom: 34px; padding: 12px 16px; }
+  #help table { border-collapse: collapse; }
+  #help td { padding: 2px 14px 2px 0; vertical-align: top; }
+  #help td:first-child { white-space: nowrap; }
+  kbd { display: inline-block; min-width: 22px; text-align: center; padding: 1px 6px; border-radius: 4px;
+    border: 1px solid var(--line); background: rgba(255,255,255,0.1); font: 12px ui-monospace, Menlo, monospace; }
+  #help.hidden table { display: none; }
+  #help .toggle { color: var(--dim); font-size: 12px; cursor: pointer; background: none; border: 0; padding: 0; }
+  #help:not(.hidden) .toggle { margin-top: 8px; }
+  #street { position: absolute; inset: 0; z-index: 12; display: none; background: #000; }
+  #pano { position: absolute; inset: 0; }
+  #streetbar { position: absolute; left: 50%; bottom: 30px; transform: translateX(-50%); z-index: 2;
+    padding: 8px 10px 8px 16px; white-space: nowrap; }
+  #streetbar button { margin-left: 12px; }
+  body.street #street { display: block; }
+  body.street #hud, body.street #help, body.street #top { display: none; }
+  #toast { position: absolute; left: 50%; top: 18px; transform: translateX(-50%); z-index: 16;
+    padding: 8px 14px; display: none; max-width: 70vw; text-align: center; }
+</style>
+</head>
+<body>
+<div id="view"></div>
+
+<div id="start">
+  <form id="card" class="panel" autocomplete="off">
+    <h1>I CAN FLY</h1>
+    <p class="sub">Take off from any address and look down on the real world.</p>
+
+    <label for="token">Cesium ion access token</label>
+    <input id="token" type="password" spellcheck="false" placeholder="Paste your token">
+    <p class="hint">Free at <a href="https://ion.cesium.com/tokens" target="_blank" rel="noopener">ion.cesium.com/tokens</a>.
+      It is saved only in this browser.</p>
+
+    <label for="gkey">Google Maps API key <span style="text-transform:none;letter-spacing:0">(optional, for landing in Street View)</span></label>
+    <input id="gkey" type="password" spellcheck="false" placeholder="Paste your key, or leave empty">
+
+    <label for="place">Where to take off</label>
+    <input id="place" type="text" placeholder="Street address, landmark, or  37.8199, -122.4783">
+
+    <div class="row">
+      <button class="go" id="go" type="submit">Take off</button>
+      <button type="button" id="cancel" style="display:none">Cancel</button>
+    </div>
+    <div id="msg" role="status"></div>
+  </form>
+</div>
+
+<div id="hud" class="panel">
+  <div class="lbl" style="margin-top:0">Speed</div>
+  <div class="big"><span id="h-speed">0</span><span class="unit">mph</span></div>
+  <div class="small" id="h-speed2">0 km/h</div>
+  <div class="lbl">Height above ground</div>
+  <div class="big"><span id="h-agl">0</span><span class="unit">ft</span></div>
+  <div class="small" id="h-agl2">0 m</div>
+  <div class="lbl">Heading / climb angle</div>
+  <div class="small" style="color:var(--ink)"><span id="h-head">N 0°</span> &nbsp;·&nbsp; <span id="h-pitch">0°</span></div>
+  <div class="lbl">Scenery</div>
+  <div class="small" id="h-mode">–</div>
+</div>
+
+<div id="top">
+  <button id="b-land" type="button">Land in Street View</button>
+  <button id="b-mode" type="button">Switch scenery</button>
+  <button id="b-place" type="button">New place</button>
+</div>
+
+<div id="help" class="panel">
+  <table>
+    <tr><td><kbd>W</kbd> <kbd>S</kbd></td><td>Speed up / slow down</td></tr>
+    <tr><td><kbd>A</kbd> <kbd>D</kbd> or <kbd>←</kbd> <kbd>→</kbd></td><td>Turn left / right</td></tr>
+    <tr><td><kbd>↑</kbd> <kbd>↓</kbd></td><td>Tilt flight path up / down</td></tr>
+    <tr><td><kbd>Space</kbd> <kbd>Shift</kbd></td><td>Rise / sink straight up or down</td></tr>
+    <tr><td>Drag mouse, <kbd>I</kbd><kbd>J</kbd><kbd>K</kbd><kbd>L</kbd></td><td>Move your eyes</td></tr>
+    <tr><td><kbd>G</kbd> / <kbd>V</kbd></td><td>Look straight down / look ahead again</td></tr>
+    <tr><td><kbd>H</kbd></td><td>Stop and hover</td></tr>
+    <tr><td><kbd>E</kbd></td><td>Land in Street View (real street-level photos)</td></tr>
+  </table>
+  <button class="toggle" id="b-help" type="button">Hide controls</button>
+</div>
+
+<div id="street">
+  <div id="pano"></div>
+  <div id="streetbar" class="panel">Street View · click the arrows on the road to walk · drag or <kbd>I</kbd><kbd>J</kbd><kbd>K</kbd><kbd>L</kbd> to look · <kbd>Space</kbd> to take off
+    <button id="b-up" type="button">Take off</button></div>
+</div>
+
+<div id="toast" class="panel"></div>
+
+<script>
+(function () {
+  'use strict';
+
+  var D2R = Math.PI / 180;
+  var EYE = 1.7;   // eye height in metres when standing
+  var $ = function (id) { return document.getElementById(id); };
+  var clamp = function (v, lo, hi) { return Math.min(hi, Math.max(lo, v)); };
+
+  var viewer = null, scene = null;
+  var photoTiles = null, osm = null, mode = 'none';
+  var pano = null, streetLib = null, landing = false;
+  var keys = {};
+
+  // Flight state. Angles in radians, distances in metres.
+  var S = {
+    lon: 0, lat: 0, h: 0,
+    heading: 0,            // direction of travel, clockwise from north
+    pitch: 0,              // flight path angle above the horizon
+    speed: 0,
+    lookYaw: 0,            // eyes, relative to direction of travel
+    lookPitch: -15 * D2R,  // eyes, relative to the horizon
+    ground: undefined,
+    flying: false,
+    inStreet: false
+  };
+
+  /* ---------- small helpers ---------- */
+
+  function store(key, value) {
+    try {
+      if (value === undefined) return localStorage.getItem(key);
+      localStorage.setItem(key, value);
+    } catch (e) { /* storage unavailable: carry on without it */ }
+    return null;
+  }
+
+  function say(text, isError) {
+    var m = $('msg');
+    m.textContent = text || '';
+    m.className = isError ? 'err' : '';
+  }
+
+  var toastTimer = 0;
+  function toast(text) {
+    var t = $('toast');
+    t.textContent = text;
+    t.style.display = 'block';
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { t.style.display = 'none'; }, 4500);
+  }
+
+  function timeout(promise, ms) {
+    return Promise.race([promise, new Promise(function (_, reject) {
+      setTimeout(function () { reject(new Error('timed out')); }, ms);
+    })]);
+  }
+
+  /* ---------- world setup ---------- */
+
+  async function createWorld(token) {
+    Cesium.Ion.defaultAccessToken = token;
+    var terrain;
+    try {
+      terrain = await Cesium.createWorldTerrainAsync();
+    } catch (e) {
+      throw new Error('Cesium did not accept that token. Check that you copied all of it.');
+    }
+    viewer = new Cesium.Viewer('view', {
+      terrainProvider: terrain,
+      animation: false, timeline: false, baseLayerPicker: false, geocoder: false,
+      homeButton: false, sceneModePicker: false, navigationHelpButton: false,
+      fullscreenButton: false, infoBox: false, selectionIndicator: false
+    });
+    scene = viewer.scene;
+    scene.screenSpaceCameraController.enableInputs = false;   // we fly the camera ourselves
+    scene.globe.depthTestAgainstTerrain = true;
+    scene.preUpdate.addEventListener(frame);
+    await setMode('google');
+  }
+
+  // 'google' = photorealistic 3D mesh. 'basic' = terrain + satellite photo + plain buildings.
+  async function setMode(next) {
+    if (next === 'google') {
+      try {
+        if (!photoTiles) {
+          photoTiles = await Cesium.createGooglePhotorealistic3DTileset();
+          scene.primitives.add(photoTiles);
+          // Near the ground the view to the horizon needs a huge number of map pieces.
+          // Give them more memory, and ask for less detail far away, so pieces are not
+          // thrown out and reloaded over and over.
+          photoTiles.cacheBytes = 1536 * 1024 * 1024;
+          photoTiles.maximumCacheOverflowBytes = 1024 * 1024 * 1024;
+          photoTiles.dynamicScreenSpaceError = true;
+          photoTiles.maximumScreenSpaceError = 20;
+        }
+      } catch (e) {
+        photoTiles = null;
+        toast('Photorealistic 3D scenery is not available right now. Using terrain and plain buildings.');
+        next = 'basic';
+      }
+    }
+    if (next === 'basic' && !osm) {
+      try {
+        osm = await Cesium.createOsmBuildingsAsync();
+        scene.primitives.add(osm);
+      } catch (e) { osm = null; }
+    }
+    mode = next;
+    if (photoTiles) photoTiles.show = (mode === 'google');
+    if (osm) osm.show = (mode === 'basic');
+    scene.globe.show = (mode === 'basic');
+    $('h-mode').textContent = mode === 'google' ? 'Photorealistic 3D' : 'Terrain + plain buildings';
+  }
+
+  /* ---------- finding the take-off point ---------- */
+
+  async function locate(text) {
+    var m = text.match(/^\s*(-?\d+(?:\.\d+)?)\s*[, ]\s*(-?\d+(?:\.\d+)?)\s*$/);
+    if (m && Math.abs(+m[1]) <= 90 && Math.abs(+m[2]) <= 180) {
+      return Cesium.Cartographic.fromDegrees(+m[2], +m[1]);
+    }
+    var results = await new Cesium.IonGeocoderService({ scene: scene }).geocode(text);
+    if (!results || !results.length) throw new Error('Could not find that place. Try a fuller address.');
+    var d = results[0].destination;
+    if (d instanceof Cesium.Rectangle) return Cesium.Rectangle.center(d);
+    return Cesium.Cartographic.fromCartesian(d);
+  }
+
+  async function takeOff(text) {
+    var spot = await locate(text);
+    var ground = 0;
+    try {
+      var sampled = await timeout(
+        Cesium.sampleTerrainMostDetailed(viewer.terrainProvider,
+          [new Cesium.Cartographic(spot.longitude, spot.latitude)]), 12000);
+      if (isFinite(sampled[0].height)) ground = sampled[0].height;
+    } catch (e) { /* fall back to sea level; the ground check below corrects it */ }
+
+    S.lon = spot.longitude; S.lat = spot.latitude;
+    S.ground = ground;
+    S.h = ground + EYE;                // start standing on the ground
+    S.settle = true;                   // keep snapping to the surface until the first key press
+    S.heading = 0; S.pitch = 0; S.speed = 0;
+    S.lookYaw = 0; S.lookPitch = 0;
+    S.flying = true;
+    lastTime = 0;
+  }
+
+  /* ---------- landing in Street View ---------- */
+
+  var mapsPromise = null;
+  function loadStreetView(key) {
+    if (!mapsPromise) {
+      mapsPromise = new Promise(function (resolve, reject) {
+        window.__gmReady = function () {
+          window.google.maps.importLibrary('streetView').then(resolve, reject);
+        };
+        var tag = document.createElement('script');
+        tag.src = 'https://maps.googleapis.com/maps/api/js?key=' + encodeURIComponent(key) +
+          '&v=weekly&loading=async&callback=__gmReady';
+        tag.onerror = function () {
+          mapsPromise = null;
+          reject(new Error('Could not reach Google Maps. Check your internet connection.'));
+        };
+        document.head.appendChild(tag);
+      });
+    }
+    return mapsPromise;
+  }
+
+  // Google calls this when it rejects the key.
+  window.gm_authFailure = function () {
+    if (S.inStreet) leaveStreet();
+    toast('Google did not accept that Maps API key. Check the key, and that the Maps JavaScript API is enabled for it.');
+  };
+
+  async function land() {
+    if (landing || !S.flying) return;
+    var key = $('gkey').value.trim();
+    if (!key) { toast('To land in Street View, add a Google Maps API key under "New place".'); return; }
+    landing = true;
+    toast('Looking for the nearest street…');
+    try {
+      streetLib = await loadStreetView(key);
+      var found;
+      try {
+        found = await new streetLib.StreetViewService().getPanorama({
+          location: { lat: S.lat / D2R, lng: S.lon / D2R },
+          radius: 300,
+          preference: streetLib.StreetViewPreference.NEAREST,
+          sources: [streetLib.StreetViewSource.OUTDOOR]
+        });
+      } catch (e) {
+        toast('No Street View photos within 300 m of here.');
+        return;
+      }
+      var pov = {
+        heading: (((S.heading + S.lookYaw) / D2R) % 360 + 360) % 360,
+        pitch: clamp(S.lookPitch / D2R, -80, 80)
+      };
+      document.body.classList.add('street');
+      if (!pano) {
+        // One viewer, created once and reused, so each landing is a single panorama load.
+        pano = new streetLib.StreetViewPanorama($('pano'), {
+          pano: found.data.location.pano, pov: pov, zoom: 0,
+          addressControl: false, fullscreenControl: false, motionTracking: false,
+          motionTrackingControl: false, panControl: false, zoomControl: false,
+          enableCloseButton: false, linksControl: true, showRoadLabels: true
+        });
+      } else {
+        pano.setPano(found.data.location.pano);
+        pano.setPov(pov);
+        pano.setVisible(true);
+      }
+      S.inStreet = true; S.flying = false; keys = {};
+      viewer.useDefaultRenderLoop = false;      // pause the 3D world while on the street
+      streetLast = 0;
+      requestAnimationFrame(streetFrame);
+      $('toast').style.display = 'none';
+    } catch (err) {
+      toast(err && err.message ? err.message : 'Street View could not be opened.');
+    } finally {
+      landing = false;
+    }
+  }
+
+  // Eye keys while standing in Street View.
+  var streetLast = 0;
+  function streetFrame(now) {
+    if (!S.inStreet) return;
+    var dt = streetLast ? Math.min((now - streetLast) / 1000, 0.1) : 0;
+    streetLast = now;
+    var eyeX = (keys.KeyL ? 1 : 0) - (keys.KeyJ ? 1 : 0);
+    var eyeY = (keys.KeyI ? 1 : 0) - (keys.KeyK ? 1 : 0);
+    if (eyeX || eyeY) {
+      var pov = pano.getPov();
+      pano.setPov({ heading: pov.heading + eyeX * 70 * dt, pitch: clamp(pov.pitch + eyeY * 70 * dt, -90, 90) });
+    }
+    requestAnimationFrame(streetFrame);
+  }
+
+  function leaveStreet() {
+    if (!S.inStreet) return;
+    var where = pano.getPosition(), pov = pano.getPov();
+    if (where) { S.lon = where.lng() * D2R; S.lat = where.lat() * D2R; }
+    S.heading = ((pov.heading % 360) + 360) % 360 * D2R;
+    S.lookYaw = 0;
+    S.lookPitch = clamp(pov.pitch, -90, 89) * D2R;
+    S.pitch = 0; S.speed = 0;
+    if (S.ground !== undefined) S.h = S.ground + EYE;
+    S.settle = true;
+    S.inStreet = false; S.flying = true; lastTime = 0; keys = {};
+    viewer.useDefaultRenderLoop = true;
+    document.body.classList.remove('street');
+  }
+
+  /* ---------- the flight loop ---------- */
+
+  var lastTime = 0, lastGroundCheck = 0, lastHud = 0;
+  var scratchOffset = new Cesium.Cartesian3();
+  var scratchPos = new Cesium.Cartesian3();
+
+  // Height of whatever is under a point, worked out from scenery that is already
+  // loaded. Unlike scene.sampleHeight this does not redraw the scene off-screen.
+  var groundMisses = 0, lastSlowCheck = 0, terrainBusy = false;
+  function groundBelow(where) {
+    var best, h;
+    var surface = mode === 'google' ? photoTiles : osm;
+    if (surface && typeof surface.getHeight === 'function') {
+      h = surface.getHeight(where, scene);
+      if (h !== undefined && isFinite(h)) best = h;
+    }
+    if (mode === 'basic') {
+      h = scene.globe.getHeight(where);
+      if (h !== undefined && isFinite(h)) best = best === undefined ? h : Math.max(best, h);
+    }
+    return best;
+  }
+
+  function frame() {
+    if (!S.flying) return;
+    var now = performance.now();
+    var dt = lastTime ? Math.min((now - lastTime) / 1000, 0.1) : 0;
+    lastTime = now;
+
+    // speed
+    var throttle = (keys.KeyW ? 1 : 0) - (keys.KeyS ? 1 : 0);
+    S.speed = clamp(S.speed + throttle * (15 + S.speed * 0.9) * dt, 0, 3000);
+
+    // direction of travel
+    var turn = (keys.KeyD || keys.ArrowRight ? 1 : 0) - (keys.KeyA || keys.ArrowLeft ? 1 : 0);
+    S.heading = (S.heading + turn * 50 * D2R * dt + 2 * Math.PI) % (2 * Math.PI);
+    var tilt = (keys.ArrowUp ? 1 : 0) - (keys.ArrowDown ? 1 : 0);
+    S.pitch = clamp(S.pitch + tilt * 35 * D2R * dt, -89 * D2R, 89 * D2R);
+
+    // eyes
+    var eyeX = (keys.KeyL ? 1 : 0) - (keys.KeyJ ? 1 : 0);
+    var eyeY = (keys.KeyI ? 1 : 0) - (keys.KeyK ? 1 : 0);
+    S.lookYaw += eyeX * 70 * D2R * dt;
+    S.lookPitch = clamp(S.lookPitch + eyeY * 70 * D2R * dt, -90 * D2R, 89 * D2R);
+
+    // straight up / down, faster the higher you are
+    var lift = (keys.Space ? 1 : 0) - (keys.ShiftLeft || keys.ShiftRight ? 1 : 0);
+    var agl = S.ground === undefined ? 100 : S.h - S.ground;
+    var liftSpeed = clamp(Math.abs(agl) * 0.6, 10, 400);
+
+    // move in the local east / north / up frame
+    var d = S.speed * dt;
+    scratchOffset.x = Math.sin(S.heading) * Math.cos(S.pitch) * d;
+    scratchOffset.y = Math.cos(S.heading) * Math.cos(S.pitch) * d;
+    scratchOffset.z = Math.sin(S.pitch) * d + lift * liftSpeed * dt;
+    var here = Cesium.Cartesian3.fromRadians(S.lon, S.lat, S.h);
+    var frameENU = Cesium.Transforms.eastNorthUpToFixedFrame(here);
+    Cesium.Matrix4.multiplyByPoint(frameENU, scratchOffset, scratchPos);
+    var c = Cesium.Cartographic.fromCartesian(scratchPos);
+    if (c) { S.lon = c.longitude; S.lat = c.latitude; S.h = c.height; }
+
+    // what is underneath us (houses and trees count)
+    if (now - lastGroundCheck > 250) {
+      lastGroundCheck = now;
+      var below = new Cesium.Cartographic(S.lon, S.lat), g;
+      try { g = groundBelow(below); } catch (e) { g = undefined; }
+      if (g === undefined) {
+        // Fallback: ask the bare-earth terrain service. Nothing is redrawn for this.
+        groundMisses++;
+        if (groundMisses >= 8 && !terrainBusy && now - lastSlowCheck > 2000) {
+          lastSlowCheck = now;
+          terrainBusy = true;
+          Cesium.sampleTerrainMostDetailed(viewer.terrainProvider, [below]).then(function (r) {
+            if (groundMisses > 0 && isFinite(r[0].height)) S.ground = r[0].height;
+          }).catch(function () {}).then(function () { terrainBusy = false; });
+        }
+      } else {
+        groundMisses = 0;
+      }
+      if (g !== undefined && isFinite(g)) {
+        S.ground = g;
+        if (S.settle) S.h = g + EYE;
+      }
+    }
+    if (S.ground !== undefined && S.h < S.ground + EYE) S.h = S.ground + EYE;
+    S.h = Math.min(S.h, 150000);
+
+    viewer.camera.setView({
+      destination: Cesium.Cartesian3.fromRadians(S.lon, S.lat, S.h),
+      orientation: { heading: S.heading + S.lookYaw, pitch: S.lookPitch, roll: 0 }
+    });
+
+    if (now - lastHud > 100) { lastHud = now; drawHud(); }
+  }
+
+  var COMPASS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+  function drawHud() {
+    var kmh = S.speed * 3.6, mph = S.speed * 2.23694;
+    $('h-speed').textContent = Math.round(mph).toLocaleString();
+    $('h-speed2').textContent = Math.round(kmh).toLocaleString() + ' km/h';
+    var agl = Math.max(0, S.h - (S.ground === undefined ? 0 : S.ground));
+    $('h-agl').textContent = Math.round(agl * 3.28084).toLocaleString();
+    $('h-agl2').textContent = Math.round(agl).toLocaleString() + ' m';
+    var deg = Math.round(S.heading / D2R) % 360;
+    $('h-head').textContent = COMPASS[Math.round(deg / 45) % 8] + ' ' + deg + '°';
+    var p = Math.round(S.pitch / D2R);
+    $('h-pitch').textContent = (p > 0 ? '+' : '') + p + '°';
+  }
+
+  /* ---------- input ---------- */
+
+  var HANDLED = { KeyW: 1, KeyS: 1, KeyA: 1, KeyD: 1, ArrowUp: 1, ArrowDown: 1, ArrowLeft: 1, ArrowRight: 1,
+    Space: 1, ShiftLeft: 1, ShiftRight: 1, KeyE: 1, KeyI: 1, KeyJ: 1, KeyK: 1, KeyL: 1, KeyG: 1, KeyV: 1, KeyH: 1 };
+
+  window.addEventListener('keydown', function (e) {
+    if (/INPUT|TEXTAREA/.test(e.target.tagName)) return;
+    if (S.inStreet) {
+      if (e.code === 'Space') { e.preventDefault(); leaveStreet(); }
+      if (/^Key[IJKL]$/.test(e.code)) { e.preventDefault(); keys[e.code] = true; }
+      return;
+    }
+    if (!S.flying) return;
+    if (!HANDLED[e.code]) return;
+    e.preventDefault();
+    keys[e.code] = true;
+    S.settle = false;
+    if (e.code === 'KeyG') { S.lookPitch = -90 * D2R; }
+    if (e.code === 'KeyV') { S.lookYaw = 0; S.lookPitch = 0; }
+    if (e.code === 'KeyH') { S.speed = 0; S.pitch = 0; }
+    if (e.code === 'KeyE') { keys.KeyE = false; land(); }
+  });
+  window.addEventListener('keyup', function (e) { keys[e.code] = false; });
+  window.addEventListener('blur', function () { keys = {}; });
+
+  var dragging = false, lastX = 0, lastY = 0;
+  $('view').addEventListener('pointerdown', function (e) {
+    if (!S.flying) return;
+    dragging = true; lastX = e.clientX; lastY = e.clientY;
+    $('view').classList.add('dragging');
+  });
+  window.addEventListener('pointermove', function (e) {
+    if (!dragging) return;
+    S.lookYaw -= (e.clientX - lastX) * 0.2 * D2R;
+    S.lookPitch = clamp(S.lookPitch + (e.clientY - lastY) * 0.2 * D2R, -90 * D2R, 89 * D2R);
+    lastX = e.clientX; lastY = e.clientY;
+  });
+  window.addEventListener('pointerup', function () {
+    dragging = false;
+    $('view').classList.remove('dragging');
+  });
+
+  /* ---------- screens ---------- */
+
+  $('token').value = store('icanfly.token') || '';
+  $('place').value = store('icanfly.place') || '';
+  $('gkey').value = store('icanfly.gkey') || '';
+
+  $('card').addEventListener('submit', async function (e) {
+    e.preventDefault();
+    var token = $('token').value.trim();
+    var place = $('place').value.trim();
+    if (!token) { say('Paste your Cesium ion token first.', true); $('token').focus(); return; }
+    if (!place) { say('Type an address or place to take off from.', true); $('place').focus(); return; }
+    if (typeof Cesium === 'undefined') {
+      say('The 3D engine did not load. Check your internet connection and reload this page.', true);
+      return;
+    }
+    $('go').disabled = true;
+    try {
+      if (!viewer) {
+        say('Loading the world…');
+        await createWorld(token);
+        store('icanfly.token', token);
+      }
+      say('Finding ' + place + '…');
+      await takeOff(place);
+      store('icanfly.place', place);
+      store('icanfly.gkey', $('gkey').value.trim());
+      say('');
+      $('start').style.display = 'none';
+      document.body.classList.add('flying');
+      document.activeElement.blur();
+      // With a Google Maps key, begin standing on the street in Street View.
+      if ($('gkey').value.trim()) await land();
+    } catch (err) {
+      say(err && err.message ? err.message : 'Something went wrong. Please try again.', true);
+    }
+    $('go').disabled = false;
+  });
+
+  $('b-place').addEventListener('click', function () {
+    keys = {};
+    $('start').classList.add('over');
+    $('start').style.display = 'grid';
+    $('cancel').style.display = '';
+    $('place').focus(); $('place').select();
+  });
+  $('cancel').addEventListener('click', function () { $('start').style.display = 'none'; say(''); });
+
+  $('b-mode').addEventListener('click', async function () {
+    this.disabled = true;
+    await setMode(mode === 'google' ? 'basic' : 'google');
+    this.disabled = false;
+    this.blur();
+  });
+
+  $('b-land').addEventListener('click', function () { this.blur(); land(); });
+  $('b-up').addEventListener('click', function () { this.blur(); leaveStreet(); });
+
+  $('b-help').addEventListener('click', function () {
+    var hidden = $('help').classList.toggle('hidden');
+    this.textContent = hidden ? 'Show controls' : 'Hide controls';
+    this.blur();
+  });
+})();
+</script>
+</body>
+</html>
