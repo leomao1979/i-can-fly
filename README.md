@@ -2,9 +2,13 @@
 
 A small browser game: take off from any address and fly over the real world.
 
+**Play it now: [icanfly.mylcky.com](https://icanfly.mylcky.com)**
+
+You bring your own free Cesium token (see below); nothing else to install.
+
 The scenery is Google's photorealistic 3D map, streamed through Cesium. Near the ground, where the 3D model looks rough, you can land in Google Street View and walk along the street, then take off again.
 
-The whole game is one file, `index.html`. There is nothing to build or install.
+The whole game is one file, `index.html`. There is nothing to build, and no server: the page talks directly to Cesium and Google from your browser.
 
 ## What you need
 
@@ -13,17 +17,18 @@ The whole game is one file, `index.html`. There is nothing to build or install.
 | Cesium ion access token | Yes | 3D scenery, terrain, address search | [ion.cesium.com/tokens](https://ion.cesium.com/tokens) (free account) |
 | Google Maps API key | No | Landing in Street View | Google Cloud console, with the **Maps JavaScript API** enabled |
 
-Both keys are typed into the game's start screen and saved only in your browser. They are never written into the file.
+Both keys are typed into the game's start screen and saved only in your own browser. They are never sent to this site or written into the file, so every player uses their own.
 
 Notes on the Google key:
 
 - It needs a Google Cloud billing account. Dynamic Street View has a free monthly allowance; each start or landing in Street View uses one panorama load.
 - You do not need a Google Maps subscription plan.
-- If you open the game as a local file, do not add a website restriction to the key, or Google will reject it. Restrict it to the Maps JavaScript API instead.
+- To play on icanfly.mylcky.com, you can restrict the key to the website `https://icanfly.mylcky.com/*`.
+- If you open the game as a local file instead, do not add a website restriction, or Google will reject the key. Restrict it to the Maps JavaScript API instead.
 
 ## How to play
 
-1. Open `index.html` in Chrome or Safari (double-click it, or host it with GitHub Pages).
+1. Open [icanfly.mylcky.com](https://icanfly.mylcky.com) in Chrome or Safari on a computer. (Or download `index.html` and double-click it.)
 2. Paste your Cesium token, and optionally your Google Maps key.
 3. Type an address, a landmark, or coordinates such as `37.8199, -122.4783`, and press **Take off**.
 
@@ -61,6 +66,7 @@ The **Switch scenery** button toggles between:
 
 ## Limits
 
+- It is built for a keyboard and mouse; there are no touch controls for phones.
 - An internet connection is required; the map data streams live and cannot be downloaded.
 - The 3D model is built from aerial photos, so it looks best from about 50 m up and rough at street level.
 - Street View exists only where Google has street photos. The game looks within 300 m of where you are.
